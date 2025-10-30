@@ -12,8 +12,8 @@
 #define PORTA_PADRAO 80
 #define BUFFER 4096
 
+// pega a URL e divide em partes lógicas
 static int verifica_url(const char *url_completa, char *buffer_host, size_t tamanho_buffer_host,char *buffer_caminho, size_t tamanho_buffer_caminho, int *porta) {
-    
     char armaza_host[256];
     char caminho_temp[512];
     
@@ -21,7 +21,6 @@ static int verifica_url(const char *url_completa, char *buffer_host, size_t tama
         fprintf(stderr, "Erro: Apenas o protocolo HTTP é suportado.\n");
         return -1;
     }
-
     if (sscanf(url_completa, "http://%255[^/]%511[^\n]", armaza_host, caminho_temp) == 2) {
         strncpy(buffer_caminho, caminho_temp, tamanho_buffer_caminho - 1);
         buffer_caminho[tamanho_buffer_caminho - 1] = '\0';
@@ -66,7 +65,7 @@ static int verifica_url(const char *url_completa, char *buffer_host, size_t tama
     return 0; 
 }
 
-
+// Extrai o nome que deverá ser salvo no disco
 static const char* extrai_nome(const char *caminho_recurso) {
     const char *nome_arquivo = strrchr(caminho_recurso, '/');
     if (nome_arquivo == NULL || *(nome_arquivo + 1) == '\0') {
@@ -75,7 +74,7 @@ static const char* extrai_nome(const char *caminho_recurso) {
     return nome_arquivo + 1; 
 }
 
-
+// salva e baixa 
 int download(const char *url_completa) {
     char nome_host[256];
     char caminho_recurso[512];

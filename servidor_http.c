@@ -9,7 +9,8 @@
 #include <netinet/in.h>
 #include <sys/stat.h>   
 #include <dirent.h>     // Para listar diretórios
-#include <fcntl.h>      
+#include <fcntl.h>   
+#include <limits.h>   
 
 
 void erro(int socket_cliente, const char *status, const char *mensagem) {
@@ -30,6 +31,7 @@ const char* obter_tipo_mime(const char *caminho_arquivo) {
     return "application/octet-stream"; 
 }
 
+// Le um arquivo e envia-lo
 void enviar_arquivo(int socket_cliente, const char *caminho_arquivo) {
     FILE *arquivo = fopen(caminho_arquivo, "rb"); 
     if (arquivo == NULL) {
@@ -42,18 +44,36 @@ void enviar_arquivo(int socket_cliente, const char *caminho_arquivo) {
     stat(caminho_arquivo, &info_arquivo);
     long tamanho_arquivo = info_arquivo.st_size;
 
-    // Cabeçalhos HTTP
-    dprintf(socket_cliente, "HTTP/1.1 200 OK\r\n");
-    dprintf(socket_cliente, "Content-Type: %s\r\n", obter_tipo_mime(caminho_arquivo));
-    dprintf(socket_cliente, "Content-Length: %ld\r\n", tamanho_arquivo);
-    dprintf(socket_cliente, "\r\n"); 
+    const char *nome_download;
+    const char *last_slash = strrchr(caminho_arquivo, '/');
+    
+    if (last_slash != NULL) {
+        nome_download = last_slash + 1;
+    } else {
+        nome_download = caminho_arquivo;
+    }
 
-    // Enviar em blocos
-    char buffer_arquivo[TAMANHO_BUFFER];
+    char cabecalhos[1024];
+        int len = snprintf(cabecalhos, sizeof(cabecalhos),
+                            "HTTP/1.1 200 OK\r\n"
+                            "Content-Type: %s\r\n"
+                            "Content-Length: %ld\r\n"
+                            "\r\n", 
+                            obter_tipo_mime(caminho_arquivo),
+                            tamanho_arquivo);
+
+        printf("Cabeçalho enviado:\n---\n%s---\n", cabecalhos); 
+
+        if (write(socket_cliente, cabecalhos, len) < 0) {
+            perror("write (enviar_arquivo - cabeçalhos)");
+            fclose(arquivo);
+            return;
+        }
+    char buffer_arquivo[TAMANHO_BUFFER]; 
     size_t bytes_lidos;
     while ((bytes_lidos = fread(buffer_arquivo, 1, TAMANHO_BUFFER, arquivo)) > 0) {
         if (write(socket_cliente, buffer_arquivo, bytes_lidos) < 0) {
-            perror("write (enviar_arquivo)");
+            perror("write (enviar_arquivo - corpo)");
             break; 
         }
     }
@@ -61,6 +81,7 @@ void enviar_arquivo(int socket_cliente, const char *caminho_arquivo) {
     printf("Arquivo enviado: %s\n", caminho_arquivo);
 }
 
+//Gera um HTML que lista todos os arquivos e pastas dentro de um diretório
 void enviar_listagem_diretorio(int socket_cliente, const char *caminho_diretorio, const char *caminho_uri) {
     DIR *diretorio = opendir(caminho_diretorio);
     if (diretorio == NULL) {
@@ -82,14 +103,21 @@ void enviar_listagem_diretorio(int socket_cliente, const char *caminho_diretorio
         if (strcmp(entrada_diretorio->d_name, ".") == 0) continue; // Ignora .
 
         char caminho_link[PATH_MAX];
-        if (caminho_uri[strlen(caminho_uri) - 1] == '/') {
-            snprintf(caminho_link, sizeof(caminho_link), "%s%s", caminho_uri, entrada_diretorio->d_name);
-        } else {
-            snprintf(caminho_link, sizeof(caminho_link), "%s/%s", caminho_uri, entrada_diretorio->d_name);
-        }
 
-        dprintf(socket_cliente, "<li><a href=\"%s\">%s</a></li>", caminho_link, entrada_diretorio->d_name);
-    }
+        const char *uri_barra = (caminho_uri[strlen(caminho_uri) - 1] == '/') ? "" : "/";
+
+        const char *suffix = "";
+        if (entrada_diretorio->d_type == DT_DIR) {
+            suffix = "/";
+        }
+        
+
+        snprintf(caminho_link, sizeof(caminho_link), "%s%s%s", caminho_uri, uri_barra, entrada_diretorio->d_name);
+
+        dprintf(socket_cliente, "<li><a href=\"%s%s\">%s%s</a></li>", 
+                 caminho_link, suffix, entrada_diretorio->d_name, suffix);
+    } 
+    
     dprintf(socket_cliente, "</ul><hr></body></html>");
 
     closedir(diretorio);
@@ -160,20 +188,24 @@ static void tratar_conexao(int socket_cliente) {
         erro(socket_cliente, "403 Forbidden", "Tipo de arquivo nao suportado.");
     }
 
+    fflush(stdout); 
+    sleep(1);       
+
     close(socket_cliente);
 }
 
-
+// Passos de um socket TCP
 int criar_socket_servidor(int porta) {
     int descritor_socket_servidor; 
     struct sockaddr_in endereco;
     int opcao = 1;
 
-    // 1. Criar Socket
+    // Criar Socket
     if ((descritor_socket_servidor = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("socket falhou");
         return -1;
     }
+    // Permite que reinicie na mesma porta
     if (setsockopt(descritor_socket_servidor, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opcao, sizeof(opcao))) {
         perror("setsockopt");
         close(descritor_socket_servidor);
@@ -183,11 +215,13 @@ int criar_socket_servidor(int porta) {
     endereco.sin_addr.s_addr = INADDR_ANY; 
     endereco.sin_port = htons(porta); 
     
+    // Conecta esse Socket em uma porta específica 
     if (bind(descritor_socket_servidor, (struct sockaddr *)&endereco, sizeof(endereco)) < 0) {
         perror("bind falhou");
         close(descritor_socket_servidor);
         return -1;
     }
+    //Pronto para receber conexões
     if (listen(descritor_socket_servidor, 10) < 0) { 
         perror("listen");
         close(descritor_socket_servidor);
@@ -196,6 +230,7 @@ int criar_socket_servidor(int porta) {
     return descritor_socket_servidor;
 }
 
+// Mantem o servidor ativo
 void loop_principal_servidor(int descritor_socket_servidor) {
     int novo_socket_cliente;
     struct sockaddr_in endereco_cliente;

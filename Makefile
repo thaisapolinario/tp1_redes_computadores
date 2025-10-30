@@ -44,6 +44,11 @@ cliente.o: cliente.c $(HDRS_CLIENT)
 	@echo "Compilando (Cliente): $<"
 	$(CC) $(CFLAGS) -c $< -o $@
 
+run: all
+	@echo "Abrindo o navegador em http://localhost:8888/ ..."
+	xdg-open http://localhost:8888/ &
+	@sleep 1 # Dá 1 segundo para o navegador abrir
+	./main_servidor meusite
 
 clean:
 	@echo "Limpando arquivos gerados..."

@@ -11,7 +11,6 @@ main_cliente:
     -Analisa a URL para extrair o host, porta e caminho.
 
 
-
 Como Compilar:
     Com 2 terminais aberto (1 para Cliente e outro para o Servidor)
 
